@@ -13,48 +13,101 @@ var empty		= "[ ]";
 var colors = ['black','red','green','yellow','blue','magenta','cyan','white'];
 
 var options = {
-	fgcolor 	: undefined,
-	bgcolor 	: undefined,
-	selectFirst	: true
+	fgcolor 		: undefined,
+	bgcolor 		: undefined,
+	selectedColor	: 'magenta',
+	isMulti			: false,
+	selectFirst		: true
+};
+
+var optionsSchema = Joi.object().keys({
+	fgcolor 		: Joi.string().valid(colors),
+	bgcolor 		: Joi.string().valid(colors),
+	selectedColor	: Joi.string().valid(colors),
+	isMulti			: Joi.boolean(),
+	selectFirst 	: Joi.boolean()
+});
+
+var validate = function(opts) {
+
+	opts = opts || {};
+
+	var result = Joi.validate(opts, optionsSchema);
+	
+	if(result.error) {
+		clio.write('@white@_red' + result.error + '`@cyan@_blackreceived: ' + util.inspect(result.error._object));
+		process.exit(1);
+	}
 };
 
 var api = Object.create({
 	current : {},	
 	lastIdx : 0,
-	pad : function(str) {
-		return str + new Array(screenliner.width - str.length + 1).join(' ');
+	
+	//	Pad string with such that it stretches across entire display
+	//
+	//	@param	{String}	str		The string to pad
+	//	@param	{String}	padChar	The character to pad with, defaulting to space.
+	//
+	pad : function(str, padChar) {
+		return str + new Array(screenliner.width - str.length + 1).join(padChar || ' ');
 	},
+	
+	//	Add (clio)colorization to a string. Used internally.
+	//
+	//	@param	{String}	str			The label for the product in a display list
+	//	@param	{String}	[fgcolor]	One of accepted #colors, setting foreground of label.
+	//	@param	{String}	[bgcolor]	One of accepted #colors, setting background of label.
+	//
+	//	@see 	#add
+	//
 	colorize : function(str, fgcolor, bgcolor) {
 	
-		bg	= ~colors.indexOf(bgcolor) || '';
-	
-		var fg = ~colors.indexOf(fgcolor) ? '@' + fgcolor : '';
+		fgcolor = fgcolor || options.fgcolor;
+		bgcolor = bgcolor || options.bgcolor;
+
+		validate({
+			fgcolor : fgcolor,
+			bgcolor : bgcolor
+		})
+
+		fgcolor = fgcolor ? '@' + fgcolor : '';
+		bgcolor = bgcolor ? '@_' + bgcolor : '';
 		
-		if(bg) {
-			bg =  '@_' + bgcolor;
+		if(bgcolor) {
 			str = this.pad(str);
 		}
 
-		return clio.prepare(fg + bg + str + '@@');
+		return clio.prepare('\x1B[1m' + fgcolor + bgcolor + str + '@@');
 	},
+	
+	//	Set options for product display
+	//
+	//	@param	{Object}	[opts]	Various display options
+	//
 	options : function(opts) {
-		opts = opts || {};
-		
-		var result = Joi.validate(opts || {}, Joi.object().keys({
-			fgcolor 	: Joi.string().valid(colors),
-			bgcolor 	: Joi.string().valid(colors),
-			selectFirst : Joi.boolean()
-		}));
-		
-		if(result.error) {
-			clio.write('@white@_red' + result.error);
-			process.exit(1);
-		}
+
+		validate(opts);
 		
 		for(var o in opts) {
 			options[o] = opts[o]
 		}
 	},
+	
+	label : function(str, fgcolor, bgcolor) {
+		console.log(this.colorize(str, fgcolor, bgcolor));
+	},
+	
+	line : function(fgcolor, bgcolor) {
+		console.log(this.colorize(this.pad('-', '-'), fgcolor, bgcolor));
+	},
+	
+	//	Add a product to a display list
+	//
+	//	@param	{String}	str			The label for the product in a display list
+	//	@param	{String}	[fgcolor]	One of accepted #colors, setting foreground of label.
+	//	@param	{String}	[bgcolor]	One of accepted #colors, setting background of label.
+	//
 	add : function(str, fgcolor, bgcolor) {
 		var to = typeof str;
 		if(str && to !== "string") {
@@ -72,9 +125,13 @@ var api = Object.create({
 		return region;
 	},
 	
+	//	Re-draws display to reflect state of this#current, such as whether checked or not.
+	//
+	//	@see	#up
+	//	@see	#down
+	//
 	updateCheck : function() {
 		
-		//	up || down has re
 		if(this.current.selected) {
 			this.current.replace(
 				selected, 
@@ -100,10 +157,14 @@ var api = Object.create({
 		}
 	},
 	
+	//	Toggle current region's #selected state
+	//
 	select : function() {
 		this.current.selected = !this.current.selected;		
 	},
 	
+	//	Return an array of selected regions
+	//
 	selected : function() {
 		return screenliner.regions.filter(function(r) {
 			return r.selected
@@ -111,6 +172,8 @@ var api = Object.create({
 	},
 	
 	//	Handler for keyboard up arrow
+	//	Sets this#current to the previous (up) screenliner region
+	//	Cyclic, so resets to bottom when top reached.
 	//
 	up : function() {
 	
@@ -126,6 +189,8 @@ var api = Object.create({
 	},
 	
 	//	Handler for keyboard down arrow
+	//	Sets this#current to the next (down) screenliner region.
+	//	Cyclic, so resets to top when botton reached.
 	//
 	down : function() {	
 	
@@ -140,9 +205,20 @@ var api = Object.create({
 		this.updateCheck()
 	},
 	
+	//	Activates keyboard commands on terminal. Allows selections to be made.
+	//
+	//	@param	{Function}	commitF		The handler receiving selections when made
+	//
 	offer : function(commitF) {
 	
 		var committed;
+		
+		var returnSelections = function() {
+			process.stdin.removeListener('keypress', handleKeypress);
+			commitF && commitF(api.selected().map(function(s) {
+				return s.id;
+			}))
+		}
 		
 		var handleKeypress = function(ch, key) {
 		
@@ -165,13 +241,12 @@ var api = Object.create({
 				
 				case "space":
 					api.select()
+					!options.isMulti && returnSelections()
 				break;
 				
 				case "return":
-					process.stdin.removeListener('keypress', handleKeypress);
-					commitF && commitF(api.selected().map(function(s) {
-						return s.id;
-					}))
+					!options.isMulti && api.select()
+					returnSelections();
 				break;
 				
 				default:

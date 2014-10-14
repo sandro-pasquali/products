@@ -7,3 +7,12 @@ usage
 =====
 
 var products = require('products');
+
+products.add('Shoes')
+products.add('Socks')
+products.add('Laces')
+
+products.offer(function(selected) {
+	console.log(selected);
+	process.exit(0);
+})

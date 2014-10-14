@@ -1,11 +1,12 @@
 var products = require('../index.js');
 
 products.options({
-	fgcolor 	: 'magenta',
-	bgcolor 	: 'white',
-	selectFirst : true
+	isMulti	: true
 })
 
+products.line('blue')
+products.label('Select by hitting SPACE. When finished, hit RETURN', 'white', 'magenta')
+products.line('blue')
 products.add('Backbone')
 products.add('Bootstrap')
 products.add('Marionette')
